@@ -262,9 +262,13 @@ public class PkinitPreauth extends AbstractPreauthPlugin {
                     System.out.println("rsa");
                 }
             }
+
+            return true;
         }
 
-        return true;
+        // Only a PK_AS_REQ carries client preauthentication data that can be
+        // verified here; any other pkinit padata type proves nothing.
+        return false;
     }
 
     private PkinitKdcContext findContext(PrincipalName principal) {

@@ -652,11 +652,16 @@ public abstract class KdcRequest {
             KrbError krbError = makePreAuthenticationError(kdcContext, request,
                 KrbErrorCode.KDC_ERR_PREAUTH_REQUIRED, false);
             throw new KdcRecoverableException(krbError);
-        } else {
-            getPreauthHandler().verify(this, preAuthData);
         }
 
-        setPreAuthenticated(true);
+        boolean preAuthenticated = getPreauthHandler().verifyAndCheck(this, preAuthData);
+        setPreAuthenticated(preAuthenticated);
+        if (!isPreAuthenticated()) {
+            LOG.info("The preauth verification failed.");
+            KrbError krbError = makePreAuthenticationError(kdcContext, request,
+                KrbErrorCode.KDC_ERR_PREAUTH_REQUIRED, false);
+            throw new KdcRecoverableException(krbError);
+        }
     }
 
     /**

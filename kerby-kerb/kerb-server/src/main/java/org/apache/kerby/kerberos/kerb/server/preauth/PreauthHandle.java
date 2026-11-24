@@ -43,7 +43,19 @@ public class PreauthHandle {
     }
 
     public void verify(KdcRequest kdcRequest, PaDataEntry paData) throws KrbException {
-        preauth.verify(kdcRequest, requestContext, paData);
+        verifyAndCheck(kdcRequest, paData);
+    }
+
+    /**
+     * Verify the preauth data entry and report whether the verification succeeded.
+     *
+     * @param kdcRequest The kdc request
+     * @param paData The preauth data entry to verify
+     * @return true if the preauth data was successfully verified, false otherwise
+     * @throws KrbException e
+     */
+    public boolean verifyAndCheck(KdcRequest kdcRequest, PaDataEntry paData) throws KrbException {
+        return preauth.verify(kdcRequest, requestContext, paData);
     }
 
     public void providePaData(KdcRequest kdcRequest, PaData paData) {

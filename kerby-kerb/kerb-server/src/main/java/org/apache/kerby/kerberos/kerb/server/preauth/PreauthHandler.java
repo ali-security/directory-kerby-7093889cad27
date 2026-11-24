@@ -95,12 +95,26 @@ public class PreauthHandler {
     }
 
     public void verify(KdcRequest kdcRequest, PaData paData) throws KrbException {
+        verifyAndCheck(kdcRequest, paData);
+    }
+
+    /**
+     * Verify the preauth data and report whether any of the entries was
+     * successfully verified by a preauth plugin.
+     *
+     * @param kdcRequest The kdc request
+     * @param paData The preauth data to verify
+     * @return true if one of the preauth data entries was successfully verified, false otherwise
+     * @throws KrbException e
+     */
+    public boolean verifyAndCheck(KdcRequest kdcRequest, PaData paData) throws KrbException {
         for (PaDataEntry paEntry : paData.getElements()) {
             PreauthHandle handle = findHandle(kdcRequest, paEntry.getPaDataType());
-            if (handle != null) {
-                handle.verify(kdcRequest, paEntry);
+            if (handle != null && handle.verifyAndCheck(kdcRequest, paEntry)) {
+                return true;
             }
         }
+        return false;
     }
 
     public void providePaData(KdcRequest kdcRequest, PaData paData) {
