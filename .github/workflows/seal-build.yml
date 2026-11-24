@@ -1,0 +1,97 @@
+# Build and test Apache Kerby on JDK 7 / Maven 3.5.0 (the toolchain the 1.0.1
+# release was built with: Build-Jdk 1.7.0_80, Created-By Apache Maven 3.5.0).
+# Upstream ships no GitHub Actions CI; this follows BUILDING.txt
+# ("mvn package" / "mvn test" from the top directory).
+name: seal-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: "Surefire -Dtest selector; empty runs the full suite"
+        required: false
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MAVEN_OPTS: "-Xmx2g -Dhttps.protocols=TLSv1.2"
+    steps:
+      - uses: actions/checkout@v4
+
+      # setup-java no longer lists Zulu 7, so fetch it straight from Azul's CDN.
+      - name: Set up JDK 7
+        run: |
+          curl -fsSL https://cdn.azul.com/zulu/bin/zulu7.56.0.11-ca-jdk7.0.352-linux_x64.tar.gz -o /tmp/jdk7.tgz
+          sudo mkdir -p /opt/jdk7
+          sudo tar -xzf /tmp/jdk7.tgz -C /opt/jdk7 --strip-components=1
+          echo "JAVA_HOME=/opt/jdk7" >> "$GITHUB_ENV"
+          echo "/opt/jdk7/bin" >> "$GITHUB_PATH"
+
+      - name: Install Maven 3.5.0
+        run: |
+          curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.5.0/binaries/apache-maven-3.5.0-bin.tar.gz -o /tmp/maven.tgz
+          tar -xzf /tmp/maven.tgz -C /opt
+          echo "/opt/apache-maven-3.5.0/bin" >> "$GITHUB_PATH"
+
+      - name: Show toolchain
+        run: |
+          java -version
+          mvn -version
+
+      # Checkstyle/PMD are skipped via the project's own -Pnochecks profile and the
+      # modernizer API-usage gate via -Dmodernizer.skip: static-analysis gates, not tests.
+      - name: Build and test (full reactor)
+        run: |
+          if [ -n "${{ inputs.test-filter }}" ]; then
+            mvn -B -V install -Pnochecks -Dmodernizer.skip=true \
+              -Dtest='${{ inputs.test-filter }}' -DfailIfNoTests=false
+          else
+            mvn -B -V install -Pnochecks -Dmodernizer.skip=true
+          fi
+
+      - name: Test report summary
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import glob, re, xml.etree.ElementTree as ET
+          srcs = glob.glob("**/src/test/java/**/*.java", recursive=True)
+          def ignore_reason(cls, meth):
+              # Surefire prints no message for a bare @Ignore; locate the annotation
+              # (and any comment next to it) in the test source to name the reason.
+              rel = cls.replace(".", "/") + ".java"
+              for p in srcs:
+                  if not p.endswith(rel):
+                      continue
+                  lines = open(p).read().split("\n")
+                  for i, l in enumerate(lines):
+                      if re.search(r"void\s+%s\s*\(" % re.escape(meth), l):
+                          ctx = [x.strip() for x in lines[max(0, i - 6):i]]
+                          ign = [x for x in ctx if "Ignore" in x]
+                          com = [x.lstrip("/* ").strip() for x in ctx if x.startswith(("//", "*", "/*")) and x.lstrip("/* ").strip()]
+                          why = "disabled upstream by %s at %s:%d" % (ign[-1] if ign else "@Ignore", p, i + 1)
+                          if com:
+                              why += " (upstream comment: %s)" % " ".join(com)
+                          return why
+              return "no message"
+          tot = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+          for f in sorted(glob.glob("**/target/surefire-reports/TEST-*.xml", recursive=True)):
+              r = ET.parse(f).getroot()
+              for k in tot:
+                  tot[k] += int(r.get(k, 0) or 0)
+              for tc in r.iter("testcase"):
+                  sk = tc.find("skipped")
+                  if sk is not None:
+                      print("SKIPPED: %s.%s -- %s" % (tc.get("classname"), tc.get("name"), sk.get("message") or (sk.text or "").strip() or ignore_reason(tc.get("classname"), tc.get("name"))))
+          passed = tot["tests"] - tot["failures"] - tot["errors"] - tot["skipped"]
+          print("TOTAL: tests=%d passed=%d failures=%d errors=%d skipped=%d" % (tot["tests"], passed, tot["failures"], tot["errors"], tot["skipped"]))
+          EOF
+
+      - name: Upload kerb-server jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: kerb-server
+          path: kerby-kerb/kerb-server/target/kerb-server-1.0.1.jar
+          if-no-files-found: error
